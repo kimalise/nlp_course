@@ -5,4 +5,5 @@ print(x)
 
 y = torch.Tensor(2, 3)
 print(y)
+print(y.shape)
 
