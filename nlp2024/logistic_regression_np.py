@@ -1,8 +1,10 @@
-from tokenize import generate_tokens
-
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from torch import dtype
+# install sklearn: pip install scikit-learn
+from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
+# f1 = 2 * P * R / (P + R)
 
 num_epochs = 100
 learning_rate = 0.01
@@ -101,11 +103,14 @@ class LogisticRegressionModel():
         self.w2 = self.w2 - lr * self.grad_w2
         self.b = self.b - lr * self.grad_b
 
-def train(model, dataloader):
-    num_batch = len(dataloader.x1) // batch_size
+def train(model, train_dataloader, val_dataloader):
+    best_f1 = -1
+    best_model = LogisticRegressionModel()
+
+    num_batch = len(train_dataloader.x1) // batch_size
     for epoch in range(num_epochs):
         for step in range(num_batch):
-            batch = dataloader.get_batch(step)
+            batch = train_dataloader.get_batch(step)
             batch_x1, batch_x2, batch_y = batch
             pred_y = model.forward(batch_x1, batch_x2)
             loss = model.loss(batch_x1, batch_x2, batch_y)
@@ -114,6 +119,31 @@ def train(model, dataloader):
             model.step(learning_rate)
 
             print("Epoch: {}, Step: {}, Loss: {:.4f}".format(epoch, step, loss))
+
+        # validation
+        f1 = test(model, val_dataloader)
+        if f1 > best_f1:
+            best_model = copy.deepcopy(model)
+            best_f1 = f1
+        print("f1: {:.4f}, best_f1: {:.4f}".format(f1, best_f1))
+
+    return best_model
+
+def test(model, dataloader):
+    pred_y = []
+    true_y = []
+    num_batch = len(dataloader.x1) // dataloader.batch_size
+    for step in range(num_batch):
+        batch = dataloader.get_batch(step)
+        batch_x1, batch_x2, batch_y = batch
+        batch_pred_y = model.forward(batch_x1, batch_x2)
+        batch_pred_y = batch_pred_y > 0.5
+        pred_y.extend(batch_pred_y.tolist())
+        true_y.extend(batch_y.tolist())
+
+    f1 = f1_score(true_y, pred_y, average="macro")
+    return f1
+
 # w1 * x1 + w2 * x2 + b = 0
 # x2 = -(w1 / w2) * x1 - (b / w2)
 def boundary_line(model, x):
@@ -128,14 +158,14 @@ if __name__ == '__main__':
 
     model = LogisticRegressionModel()
 
-    train(model, train_dataloader)
+    best_model = train(model, train_dataloader, val_dataloader)
 
     plt.scatter(x1, x2, c=y)
 
     line_x1 = []
     line_x2 = []
     for i in np.arange(0, 6, 0.1):
-        j = boundary_line(model, i)
+        j = boundary_line(best_model, i)
         line_x1.append(i)
         line_x2.append(j)
     plt.plot(line_x1, line_x2)
