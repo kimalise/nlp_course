@@ -3,11 +3,18 @@ import torch
 from collections import Counter
 from torch.utils.data import Dataset, DataLoader
 
+from nlp2024.linear_torch import optimizer
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 C = 2 # C * 2 + 1
 K = 2
 VOCAB_SIZE = 30000
 UNK = "<UNK>"
 word_vec_dim = 200
+batch_size = 128
+epochs = 2
+learning_rate = 1e-2
 
 with open("data/text8.train.txt", "r", encoding='utf-8') as f:
     text = f.read()
@@ -42,7 +49,7 @@ class SkipGramDataset(Dataset):
     def __init__(self, text_list, idx2word, word2idx, word_freq):
         text_index = [word2idx.get(word, word2idx[UNK]) for word in text_list]
         self.text_tensor = torch.tensor(text_index, dtype=torch.long)
-        self.word_freq = self.tensor(word_freq, dtype=torch.float64)
+        self.word_freq = torch.tensor(word_freq, dtype=torch.float64)
 
     def __len__(self):
         return self.text_tensor.shape[0]
@@ -72,7 +79,54 @@ class SkipGramModel(torch.nn.Module):
         :param neg_words: [B, 2 * C * K]
         :return: loss
         '''
-        pass
+        center_word_emb = self.in_embedding(center_word) # [B, d]
+        pos_words_emb = self.out_embedding(pos_words) # [B, 2 * C, d]
+        neg_words_emb = self.out_embedding(neg_words) # [B, 2 * C * K, d]
+
+        # bmm [B, 2 * C, d] x [B, d, 1] = [B, 2 * C, 1]
+        pos_logits = torch.bmm(pos_words_emb, torch.unsqueeze(center_word_emb, 2))
+        pos_logits = pos_logits.squeeze()
+
+        # bmm [B, 2 * C * K, d] x [B, d, 1] = [B, 2 * C * K, 1]
+        neg_logits = torch.bmm(neg_words_emb, -torch.unsqueeze(center_word_emb))
+        neg_logits = neg_logits.squeeze()
+
+        pos_logits = torch.nn.functional.logsigmoid(pos_logits) # [B, 2 * C]
+        neg_logits = torch.nn.functional.logsigmoid(neg_logits) # [B, 2 * C * K]
+
+        pos_logits = torch.sum(pos_logits, dim=1) # [B]
+        neg_logits = torch.sum(neg_logits, dim=1) # [B]
+
+        loss = pos_logits + neg_logits # [B]
+
+        loss = torch.mean(loss)
+        loss = -loss
+        return loss
+
+# train skip-gram
+dataset = SkipGramDataset(text_list, idx2word, word2idx, word_freq)
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+model = SkipGramModel(VOCAB_SIZE + 1, word_vec_dim)
+model.to(device)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+for epoch in range(epochs):
+    for step, batch in enumerate(dataloader):
+        batch_center_word, batch_pos_words, batch_neg_words = batch
+        batch_center_word = batch_center_word.to(device)
+        batch_pos_words = batch_pos_words.to(device)
+        batch_neg_words = batch_neg_words.to(device)
+
+        loss = model(batch_center_word, batch_pos_words, batch_neg_words)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if step % 100 == 0:
+            print("Epoch: {}, Step: {}, Loss: {:.4f}".format(epoch, step, loss.item()))
 
 print('finish')
 
