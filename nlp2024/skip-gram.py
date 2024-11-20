@@ -3,8 +3,6 @@ import torch
 from collections import Counter
 from torch.utils.data import Dataset, DataLoader
 
-from nlp2024.linear_torch import optimizer
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 C = 2 # C * 2 + 1
@@ -28,7 +26,7 @@ def my_tokenizer(text):
 text_list = my_tokenizer(text)
 
 counter = Counter(text_list).most_common(VOCAB_SIZE)
-print(counter)
+# print(counter)
 
 counter = dict(counter)
 
@@ -56,16 +54,18 @@ class SkipGramDataset(Dataset):
 
     def __getitem__(self, index):
         center_word = self.text_tensor[index]
+        center_word = torch.tensor(center_word, dtype=torch.long)
         # center_word: 5 -> [3, 4, 6, 7]
         context_index = list(range(index - C, index)) + list(range(index + 1, index + C + 1))
         pos_words = self.text_tensor[context_index]
         neg_words = torch.multinomial(self.word_freq, C * 2 * K, replacement=False)
 
-        return context_index, pos_words, neg_words
+        return center_word, pos_words, neg_words
 
 # skip-gram model
 class SkipGramModel(torch.nn.Module):
     def __init__(self, vocab_size, word_vec_dim):
+        super(SkipGramModel, self).__init__()
         self.in_embedding = torch.nn.Embedding(vocab_size, word_vec_dim)
         self.out_embedding = torch.nn.Embedding(vocab_size, word_vec_dim)
         init_value = 0.5 / word_vec_dim
@@ -88,7 +88,7 @@ class SkipGramModel(torch.nn.Module):
         pos_logits = pos_logits.squeeze()
 
         # bmm [B, 2 * C * K, d] x [B, d, 1] = [B, 2 * C * K, 1]
-        neg_logits = torch.bmm(neg_words_emb, -torch.unsqueeze(center_word_emb))
+        neg_logits = torch.bmm(neg_words_emb, -torch.unsqueeze(center_word_emb, dim=2))
         neg_logits = neg_logits.squeeze()
 
         pos_logits = torch.nn.functional.logsigmoid(pos_logits) # [B, 2 * C]
